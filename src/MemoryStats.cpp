@@ -32,7 +32,7 @@ COPYRIGHT
 */
 
 static char const szRCSID[] =
-    "$Id: MemoryStats.cpp 3047 2026-01-10 20:55:38Z roger $";
+    "$Id: MemoryStats.cpp 3163 2026-07-17 11:10:52Z roger $";
 
 #ifdef _M_X64
 #include <ntstatus.h>
@@ -105,7 +105,7 @@ public:
                      EXIT_PROCESS_DEBUG_INFO const &exitProcess) override;
 };
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 void MemoryStats::OnCreateProcess(
     DWORD processId, DWORD /*threadId*/,
     CREATE_PROCESS_DEBUG_INFO const &createProcess) {
@@ -117,7 +117,7 @@ void MemoryStats::OnCreateProcess(
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 void MemoryStats::OnExitProcess(DWORD processId, DWORD /*threadId*/,
                                 HANDLE hProcess,
                                 EXIT_PROCESS_DEBUG_INFO const &exitProcess) {
@@ -160,7 +160,7 @@ void MemoryStats::OnExitProcess(DWORD processId, DWORD /*threadId*/,
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
   bool bOnly(false);
   std::string filter{".*"};

@@ -31,7 +31,7 @@ COPYRIGHT
   IN THE SOFTWARE."
 */
 
-// $Id: GetModuleBase.cpp 3054 2026-01-10 23:26:12Z roger $
+// $Id: GetModuleBase.cpp 3163 2026-07-17 11:10:52Z roger $
 
 #include "GetModuleBase.h"
 
@@ -64,7 +64,7 @@ void fixSymSrv() {
 }
 } // namespace
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 /// GetModuleBase: try to get information about a module being loaded
 ///
 /// This function is called by the stack walker to load symbols for a new

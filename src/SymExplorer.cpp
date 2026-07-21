@@ -32,7 +32,7 @@ COPYRIGHT
 */
 
 static char const szRCSID[] =
-    "$Id: SymExplorer.cpp 3145 2026-04-10 20:23:55Z roger $";
+    "$Id: SymExplorer.cpp 3169 2026-07-17 19:03:47Z roger $";
 
 #define NOMINMAX
 
@@ -346,10 +346,10 @@ void appendQuotedString(std::string &name, std::istream &iss) {
 
 } // namespace
 
-////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // forward references
 
-////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 SymExplorer::SymExplorer(std::string prompt)
     : eng_(GetCurrentProcess()), prompt_(std::move(prompt)) {
   // We want to undecorate functions ourselves and we want to work with both the
@@ -401,7 +401,7 @@ SymExplorer::SymExplorer(std::string prompt)
   define("udt", &SymExplorer::udt, "Display a user defined type in C++ format");
 }
 
-////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // enumSymbolsCallback
 //
 // Called by Debug engine for each public/global symbol
@@ -433,7 +433,7 @@ BOOL SymExplorer::enumSymbolsCallback(std::string const &symbol_name,
   return !ctrlc_;
 }
 
-////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // enumTypesCallback
 //
 // Called by Debug engine for each type
@@ -455,7 +455,7 @@ BOOL SymExplorer::enumTypesCallback(std::string const &symbol_name, ULONG index,
   return !ctrlc_;
 }
 
-////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // odrCallback
 //
 // Called by Debug engine during ODR detection
@@ -601,9 +601,9 @@ bool SymExplorer::odr(std::istream &iss) {
   return result;
 }
 
-//*************************************************************************************//
+//***************************************************************************//
 // showModule: try to get information about a module being loaded //
-//*************************************************************************************//
+//***************************************************************************//
 bool SymExplorer::showModule(std::istream & /* iss */) {
   bool result(false);
   DbgInit<IMAGEHLP_MODULE64> ModuleInfo;

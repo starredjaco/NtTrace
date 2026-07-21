@@ -31,7 +31,7 @@ COPYRIGHT
   IN THE SOFTWARE."
 */
 
-// $Id: SymbolEngine.cpp 3074 2026-01-23 23:23:52Z roger $
+// $Id: SymbolEngine.cpp 3163 2026-07-17 11:10:52Z roger $
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4511 4512) // copy constructor/assignment operator
@@ -226,14 +226,14 @@ BOOL getWow64ThreadContext(HANDLE hThread, WOW64_CONTEXT *pWowContext);
 
 } // namespace
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 /** Implementation class */
 struct SymbolEngine::Impl {
   std::map<DWORD64, std::string> addressMap;
   std::map<std::pair<DWORD64, DWORD>, std::string> inlineMap;
 };
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 #pragma warning(push)
 #pragma warning(disable : 4996)
 SymbolEngine::SymbolEngine(HANDLE hProcess) : pImpl_(new Impl) {
@@ -256,14 +256,14 @@ SymbolEngine::SymbolEngine(HANDLE hProcess) : pImpl_(new Impl) {
 }
 #pragma warning(pop)
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Destroy wrapper
 SymbolEngine::~SymbolEngine() {
   fixSymSrv();
   delete pImpl_;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // true to show line numbers if possible
 void SymbolEngine::setLines(bool value) { showLines_ = value; }
 
@@ -294,12 +294,12 @@ void SymbolEngine::setSehDepth(int value) { maxSehDepth_ = value; }
 
 int SymbolEngine::getSehDepth() const { return maxSehDepth_; }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 DWORD64 SymbolEngine::GetModuleBase(DWORD64 dwAddress) const {
   return ::GetModuleBase(GetProcess(), dwAddress);
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 bool SymbolEngine::printAddress(DWORD64 address, std::ostream &os) const {
   bool cacheSymbol(true);
 
@@ -388,7 +388,7 @@ bool SymbolEngine::printAddress(DWORD64 address, std::ostream &os) const {
   return cacheSymbol;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 /** Print inline address to a stream */
 void SymbolEngine::printInlineAddress(DWORD64 address, DWORD inline_context,
                                       std::ostream &os) const {
@@ -432,7 +432,7 @@ void SymbolEngine::printInlineAddress(DWORD64 address, DWORD inline_context,
 #endif // DBGHELP_6_2_APIS
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Convert address to a string.
 std::string SymbolEngine::addressToName(DWORD64 address) const {
   auto it = pImpl_->addressMap.find(address);
@@ -451,7 +451,7 @@ std::string SymbolEngine::addressToName(PVOID pointer) const {
   return addressToName(DWORD64(pointer));
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Convert inline address to a string.
 std::string SymbolEngine::inlineToName(DWORD64 address,
                                        DWORD inline_context) const {
@@ -466,7 +466,7 @@ std::string SymbolEngine::inlineToName(DWORD64 address,
   return it->second;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // StackTrace: try to trace the stack to the given output stream
 void SymbolEngine::StackTrace(HANDLE hThread, const CONTEXT &context,
                               std::ostream &os) const {
@@ -648,8 +648,8 @@ void SymbolEngine::StackTrace(HANDLE hThread, const CONTEXT &context,
 // prevent trying to stack walk after we've modified the stack...
 // static
 #ifdef _M_IX86
-BOOL __declspec(naked)
-SymbolEngine::GetCurrentThreadContext(CONTEXT *pContext) {
+BOOL
+    __declspec(naked) SymbolEngine::GetCurrentThreadContext(CONTEXT *pContext) {
   DWORD regIp, regSp, regBp;
   BOOL rc;
 
@@ -999,7 +999,7 @@ BOOL SymbolEngine::dumpSelf(std::string const &miniDumpFile,
   return ret;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Read a string from the target
 std::string SymbolEngine::getString(PVOID address, BOOL unicode,
                                     DWORD maxStringLength) const {
@@ -1024,7 +1024,7 @@ std::string SymbolEngine::getString(PVOID address, BOOL unicode,
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 // Returns whether address points to executable code
 bool SymbolEngine::isExecutable(DWORD64 address) const {
   bool ret(false);

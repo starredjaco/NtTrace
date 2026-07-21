@@ -28,10 +28,10 @@
   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
   IN THE SOFTWARE."
 
-  $Revision: 3021 $
+  $Revision: 3163 $
 */
 
-// $Id: ProcessInfo.h 3021 2025-12-22 20:03:38Z roger $
+// $Id: ProcessInfo.h 3163 2026-07-17 11:10:52Z roger $
 
 #include "NtDllStruct.h"
 
@@ -157,22 +157,22 @@ using PRTL_USER_PROCESS_PARAMETERS = RTL_USER_PROCESS_PARAMETERS *;
 /** typedef for the call to NtQueryInformationProcess */
 using NtQueryInformationProcess =
     // NTOSAPI
-    NTSTATUS
-    NTAPI(IN HANDLE ProcessHandle, ///< Handle to the process
-          IN PROCESSINFOCLASS
-              ProcessInformationClass,  ///< Class of information requested
-          OUT PVOID ProcessInformation, ///< Buffer for returned information
-          IN ULONG
-              ProcessInformationLength, ///< Length of ProcessInformation buffer
-          OUT PULONG ReturnLength OPTIONAL); ///< Returned length
+    NTSTATUS NTAPI(
+        IN HANDLE ProcessHandle, ///< Handle to the process
+        IN PROCESSINFOCLASS
+            ProcessInformationClass,  ///< Class of information requested
+        OUT PVOID ProcessInformation, ///< Buffer for returned information
+        IN ULONG
+            ProcessInformationLength, ///< Length of ProcessInformation buffer
+        OUT PULONG ReturnLength OPTIONAL); ///< Returned length
 
 /** typedef for the call to NtSetInformationProcess */
-using NtSetInformationProcess = NTSTATUS
-NTAPI(IN HANDLE ProcessHandle, ///< Handle to the process
-      IN PROCESSINFOCLASS
-          ProcessInformationClass,          ///< Class of information requested
-      IN PVOID ProcessInformation OPTIONAL, ///< Buffer for returned information
-      IN ULONG Length); ///< Length of ProcessInformation buffer
+using NtSetInformationProcess = NTSTATUS NTAPI(
+    IN HANDLE ProcessHandle, ///< Handle to the process
+    IN PROCESSINFOCLASS
+        ProcessInformationClass,          ///< Class of information requested
+    IN PVOID ProcessInformation OPTIONAL, ///< Buffer for returned information
+    IN ULONG Length); ///< Length of ProcessInformation buffer
 
 /**
  * Process Environment Block
