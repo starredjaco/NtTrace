@@ -31,7 +31,7 @@ COPYRIGHT
   IN THE SOFTWARE."
 */
 
-// $Id: EntryPoint.cpp 3058 2026-01-10 23:45:41Z roger $
+// $Id: EntryPoint.cpp 3186 2026-09-04 22:43:48Z roger $
 
 #include "EntryPoint.h"
 
@@ -613,6 +613,16 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
                          nullptr)) {
     std::cerr << "Cannot trap " << name_ << " - unable to read memory at "
               << (void *)address << ": " << displayError() << std::endl;
+    return {};
+  }
+
+  // Check for entrypoints that may be modified by security software
+  // by comparing the unmodified target with the local code
+  // (instrumented DLLs are all in KnownDlls so have a common address)
+  if (memcmp(address, instruction, 4) != 0) {
+    std::cerr << "Cannot trap " << name_ << " - contents are modified ("
+              << buffToHex(instruction, 4) << " => " << buffToHex(address, 4)
+              << ")" << std::endl;
     return {};
   }
 
