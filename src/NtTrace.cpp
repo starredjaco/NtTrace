@@ -37,7 +37,7 @@ EXAMPLE
 */
 
 static char const szRCSID[] =
-    "$Id: NtTrace.cpp 3100 2026-02-14 13:57:33Z roger $";
+    "$Id: NtTrace.cpp 3190 2026-09-05 19:49:04Z roger $";
 
 #ifdef _M_X64
 #include <ntstatus.h>
@@ -199,18 +199,24 @@ private:
   static TrapNtDebugger *ctrlcTarget_;
   static BOOL __stdcall CtrlHandler(DWORD fdwCtrlType);
 
-  std::map<DWORD, HANDLE> processes_; // map of all active child processes
-  EntryPointSet entryPoints_;         // Set of all entry points
+  struct ProcessData {
+    HANDLE hProcess_{};
+    bool initialized_{};
+    std::map<PVOID, std::string> dll_names_; // names of dlls by handle
+    std::map<LPVOID, NtCall>
+        NtCalls_; // Complete list of all the calls we're tracking
+    std::map<LPVOID, NtCall *>
+        NtPreSave_; // Pre save list of all the calls we're tracking
+  };
+
+  std::map<DWORD, ProcessData> processes_; // map of all active child processes
+  EntryPointSet entryPoints_;              // Set of all entry points
   EntryPoint::Typedefs typedefs_;
 
   Offsets offsets_; // Offsets of potential Nt functions in the target Dll (not
                     // needed for NtDll)
 
   void populateOffsets();
-
-  using NTCALLS = std::map<LPVOID, NtCall>;
-  NTCALLS NtCalls_;   // Complete list of all the calls we're tracking
-  NTCALLS NtPreSave_; // Pre save list of all the calls we're tracking
 
   HMODULE BaseOfNtDll_ = nullptr; // base of NTDLL.DLL
 
@@ -223,21 +229,18 @@ private:
   std::vector<std::string>
       filters_; // If not empty, filter for 'active' entry points
 
-  std::set<DWORD> initialised_processes_;
   std::set<NTSTATUS> errorCodes_;
-
-  std::map<DWORD, std::map<PVOID, std::string>> dll_names_;
 
   bool OnBreakpoint(DWORD processId, DWORD threadId, HANDLE hProcess,
                     HANDLE hThread, LPVOID exceptionAddress);
 
-  void SetDllBreakpoints(HANDLE hProcess);
+  void SetDllBreakpoints(ProcessData &process_data);
   void showUnused(std::set<std::string> const &unused, std::string const &name);
   void showModuleNameEx(HANDLE hProcess, PVOID lpModuleBase,
                         HANDLE hFile) const;
   void header(DWORD processId, DWORD threadId);
   bool detachAll();
-  bool detach(DWORD processId, HANDLE hProcess);
+  bool detach(DWORD processId, ProcessData &process_data);
   void setShowLoaderSnaps(HANDLE hProcess);
 };
 
@@ -482,19 +485,22 @@ bool TrapNtDebugger::OnBreakpoint(DWORD processId, DWORD threadId,
     return false; // We couldn't handle this breakpoint
   }
 
-  NTCALLS::const_iterator it = NtPreSave_.find(exceptionAddress);
-  if (it != NtPreSave_.end()) {
-    it->second.entryPoint_->doPreSave(hProcess, hThread, Context);
+  ProcessData &process_data = processes_[processId];
+
+  const auto pre_it = process_data.NtPreSave_.find(exceptionAddress);
+  if (pre_it != process_data.NtPreSave_.end()) {
+    NtCall &ntCall = *pre_it->second;
+    ntCall.doPreSave(hProcess, hThread, Context);
     if (bPreTrace) {
       header(processId, threadId);
 
-      it->second.entryPoint_->trace(os_, hProcess, hThread, Context, bNames,
-                                    bStackTrace, true);
+      ntCall.entryPoint_->trace(os_, hProcess, hThread, Context, bNames,
+                                bStackTrace, true);
     }
     return true; // Breakpoint handled
   }
-  it = NtCalls_.find(exceptionAddress);
-  if (it != NtCalls_.end()) {
+  const auto it = process_data.NtCalls_.find(exceptionAddress);
+  if (it != process_data.NtCalls_.end()) {
     it->second.entryPoint_->countCall();
 #ifdef _M_IX86
     const auto rc{static_cast<NTSTATUS>(Context.Eax)};
@@ -558,7 +564,9 @@ void TrapNtDebugger::OnException(DWORD processId, DWORD threadId,
     } else {
       // Not an NtTrace breakpoint
       header(processId, threadId);
-      if (initialised_processes_.insert(processId).second) {
+      auto &process_data = processes_[processId];
+      if (!process_data.initialized_) {
+        process_data.initialized_ = true;
         os_ << "Initial breakpoint" << std::endl;
       } else {
         os_ << "Breakpoint at " << Exception.ExceptionRecord.ExceptionAddress
@@ -687,7 +695,7 @@ void TrapNtDebugger::OnCreateProcess(
       << " with command line: " << CommandLine(CreateProcessInfo.hProcess)
       << std::endl;
 
-  processes_[processId] = CreateProcessInfo.hProcess;
+  processes_[processId].hProcess_ = CreateProcessInfo.hProcess;
 
   if (!CreateProcessInfo.lpImageName ||
       !showName(os_, CreateProcessInfo.hProcess, CreateProcessInfo.lpImageName,
@@ -718,8 +726,6 @@ void TrapNtDebugger::OnExitProcess(DWORD processId, DWORD threadId,
   os_ << "Process " << processId << " exit code: " << ExitProcess.dwExitCode
       << std::endl;
   processes_.erase(processId);
-  initialised_processes_.erase(processId);
-  dll_names_.erase(processId);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -738,7 +744,7 @@ void TrapNtDebugger::OnLoadDll(DWORD processId, DWORD threadId, HANDLE hProcess,
       if (LoadDll.hFile) {
         const std::string filename = GetFileNameFromHandle(LoadDll.hFile);
         if (!filename.empty()) {
-          dll_names_[processId][LoadDll.lpBaseOfDll] = filename;
+          processes_[processId].dll_names_[LoadDll.lpBaseOfDll] = filename;
         }
       }
     }
@@ -754,7 +760,7 @@ void TrapNtDebugger::OnLoadDll(DWORD processId, DWORD threadId, HANDLE hProcess,
   }
 
   if (LoadDll.lpBaseOfDll == TargetDll_) {
-    SetDllBreakpoints(hProcess);
+    SetDllBreakpoints(processes_[processId]);
   }
 }
 
@@ -764,10 +770,11 @@ void TrapNtDebugger::OnUnloadDll(DWORD processId, DWORD threadId,
   if (bLogDlls_) {
     header(processId, threadId);
     os_ << "Unload of DLL at " << UnloadDll.lpBaseOfDll;
-    auto it = dll_names_[processId].find(UnloadDll.lpBaseOfDll);
-    if (it != dll_names_[processId].end()) {
+    auto &dll_names = processes_[processId].dll_names_;
+    auto it = dll_names.find(UnloadDll.lpBaseOfDll);
+    if (it != dll_names.end()) {
       os_ << " (" << it->second << ")";
-      dll_names_[processId].erase(it);
+      dll_names.erase(it);
     }
     os_ << std::endl;
   }
@@ -831,7 +838,7 @@ bool TrapNtDebugger::listCategories() {
 
 //////////////////////////////////////////////////////////////////////////
 // Set up the NT breakpoints loaded from the configuration file
-void TrapNtDebugger::SetDllBreakpoints(HANDLE hProcess) {
+void TrapNtDebugger::SetDllBreakpoints(ProcessData &process_data) {
   std::set<std::string> unusedCategories(categories_);
   std::set<std::string> unusedFilters(filters_.begin(), filters_.end());
 
@@ -864,12 +871,13 @@ void TrapNtDebugger::SetDllBreakpoints(HANDLE hProcess) {
     if (bRequired) {
       auto &ep = const_cast<EntryPoint &>(
           entryPoint); // set iterator returns const object :-(
-      NtCall const nt = ep.setNtTrap(hProcess, TargetDll_, bPreTrace,
-                                     offsets_[ep.getName()], bVerbose);
-      if (nt.entryPoint_ != nullptr) {
-        NtCalls_[ep.getAddress()] = nt;
-        if (ep.getPreSave()) {
-          NtPreSave_[ep.getPreSave()] = nt;
+      NtCall const nt =
+          ep.setNtTrap(process_data.hProcess_, TargetDll_, bPreTrace,
+                       offsets_[ep.getName()], bVerbose);
+      if (nt.getAddress() != nullptr) {
+        auto &item = process_data.NtCalls_[nt.getAddress()] = nt;
+        if (nt.getPreSave()) {
+          process_data.NtPreSave_[nt.getPreSave()] = &item;
         }
         ++trapped;
       }
@@ -915,7 +923,7 @@ void TrapNtDebugger::SetDllBreakpoints(HANDLE hProcess) {
     }
   }
 
-  FlushInstructionCache(hProcess, nullptr, 0);
+  FlushInstructionCache(process_data.hProcess_, nullptr, 0);
 }
 
 void TrapNtDebugger::showUnused(std::set<std::string> const &unused,
@@ -926,23 +934,23 @@ void TrapNtDebugger::showUnused(std::set<std::string> const &unused,
   }
 }
 
-bool TrapNtDebugger::detach(DWORD processId, HANDLE hProcess) {
-  for (const auto &it : NtCalls_) {
+bool TrapNtDebugger::detach(DWORD processId, ProcessData &process_data) {
+  for (const auto &it : process_data.NtCalls_) {
     NtCall const &ntCall = it.second;
-    if (!ntCall.entryPoint_->clearNtTrap(hProcess, ntCall)) {
+    if (!ntCall.clearNtTrap(process_data.hProcess_)) {
       std::cerr << "Cannot clear trap for " << ntCall.entryPoint_->getName()
                 << " in " << processId << '\n';
       return false;
     }
   }
-  FlushInstructionCache(hProcess, nullptr, 0);
+  FlushInstructionCache(process_data.hProcess_, nullptr, 0);
 
   return true;
 }
 
 bool TrapNtDebugger::detachAll() {
-  for (auto processe : processes_) {
-    if (processe.second) {
+  for (auto &processe : processes_) {
+    if (processe.second.hProcess_) {
       if (!detach(processe.first, processe.second)) {
         return false;
       }
@@ -954,7 +962,7 @@ bool TrapNtDebugger::detachAll() {
   bActive_ = false;
 
   for (auto processe : processes_) {
-    DebugBreakProcess(processe.second);
+    DebugBreakProcess(processe.second.hProcess_);
   }
   return true;
 }

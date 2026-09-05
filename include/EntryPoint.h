@@ -29,10 +29,10 @@
   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
   IN THE SOFTWARE."
 
-  $Revision: 3100 $
+  $Revision: 3190 $
 */
 
-// $Id: EntryPoint.h 3100 2026-02-14 13:57:33Z roger $
+// $Id: EntryPoint.h 3190 2026-09-05 19:49:04Z roger $
 
 #include <windows.h>
 
@@ -182,21 +182,6 @@ public:
   NtCall setNtTrap(HANDLE hProcess, HMODULE hTargetDll, bool bPreTrace,
                    DWORD dllOffset, bool verbose);
 
-  /** Clear the trap for this entry in the target process */
-  bool clearNtTrap(HANDLE hProcess, NtCall const &ntcall) const;
-
-  void setAddress(unsigned char *brkptAddress) {
-    targetAddress_ = brkptAddress;
-  }
-
-  unsigned char *getAddress() const { return targetAddress_; }
-
-  void setPreSave(unsigned char *preSaveAddress) { preSave_ = preSaveAddress; }
-
-  unsigned char *getPreSave() const { return preSave_; }
-
-  void doPreSave(HANDLE hProcess, HANDLE hThread, CONTEXT const &Context);
-
   void countCall() { ++total_; }
 
   size_t getTotal() const { return total_; }
@@ -215,17 +200,16 @@ private:
   std::string category_;            // category of entry point
   bool disabled_{};                 // this entry point is disabled
   bool optional_{};                 // this entry point is optional
+  bool inactive_{true};             // this entry point is inactive
   std::vector<Argument> arguments_; // vector of arguments
   ReturnType retType_{};            // Return type
   std::string retTypeName_;         // full name of return type
-  unsigned char *targetAddress_{};
-  unsigned char *preSave_{}; // address of pre-save (for X64 fast-call)
-  DWORD ssn_{};              // System Service Number
-                             // Used to set Eax/Rax to pre-call breakpoint
-  size_t total_{};           // total call count
+  size_t total_{};                  // total call count
 
   NtCall insertBrkpt(HANDLE hProcess, unsigned char *address,
-                     unsigned int offset, unsigned char *setssn);
+                     unsigned int offset, DWORD ssn, unsigned char *setssn);
+
+  void setActive() { inactive_ = false; }
 };
 
 using EntryPointSet = std::set<EntryPoint>;
@@ -240,6 +224,26 @@ struct NtCall {
   enum TrapType { trapContinue, trapReturn, trapReturn0, trapJump };
   TrapType trapType_{};
   DWORD jumpTarget_{}; // used for trapJump
+
+  unsigned char *targetAddress_{};
+  unsigned char *preSave_{}; // address of pre-save (for X64 fast-call)
+  DWORD ssn_{};              // System Service Number
+                             // Used to set Eax/Rax to pre-call breakpoint
+
+  void setAddress(unsigned char *brkptAddress) {
+    targetAddress_ = brkptAddress;
+  }
+
+  unsigned char *getAddress() const { return targetAddress_; }
+
+  /** Clear the trap for this entry in the target process */
+  bool clearNtTrap(HANDLE hProcess) const;
+
+  void setPreSave(unsigned char *preSaveAddress) { preSave_ = preSaveAddress; }
+
+  unsigned char *getPreSave() const { return preSave_; }
+
+  void doPreSave(HANDLE hProcess, HANDLE hThread, CONTEXT const &Context) const;
 };
 
 #endif // ENTRYPOINT_H_

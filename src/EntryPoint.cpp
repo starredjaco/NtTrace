@@ -31,7 +31,7 @@ COPYRIGHT
   IN THE SOFTWARE."
 */
 
-// $Id: EntryPoint.cpp 3186 2026-09-04 22:43:48Z roger $
+// $Id: EntryPoint.cpp 3190 2026-09-05 19:49:04Z roger $
 
 #include "EntryPoint.h"
 
@@ -419,7 +419,8 @@ void Argument::printOn(std::ostream &os) const {
 
 //////////////////////////////////////////////////////////////////////////
 NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
-                               unsigned int offset, unsigned char *setssn) {
+                               unsigned int offset, DWORD ssn,
+                               unsigned char *setssn) {
   // (The post-call code is at address + offset)
   // Looks like:-
   //  C2 20 00           ret         20h
@@ -432,6 +433,7 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
   //  E9 XX XX XX XX     jmp         commonExit
 
   NtCall nt;
+  nt.ssn_ = ssn;
 
   unsigned char instruction[8];
 
@@ -531,6 +533,9 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
     return {};
   }
 
+  // Entry point is available
+  setActive();
+
   // Now we know the actual argument count...
   size_t const nKnown(getArgumentCount());
   if (nt.nArgs_ > nKnown) {
@@ -547,7 +552,7 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
                 << (nExtra == 1 ? "" : "s") << " for " << name_ << std::endl;
     }
   }
-  setAddress(address + offset);
+  nt.setAddress(address + offset);
 
   if (setssn) {
     instruction[0] = BRKPT;
@@ -561,7 +566,7 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
                 << std::endl;
       return {};
     }
-    setPreSave(setssn);
+    nt.setPreSave(setssn);
   }
 
   nt.entryPoint_ = this;
@@ -684,24 +689,26 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
     return {};
   }
 
-  memcpy(&ssn_, instruction + (setssn - address) + 1, sizeof(ssn_));
+  DWORD ssn{};
+  memcpy(&ssn, instruction + (setssn - address) + 1, sizeof(ssn));
   if (verbose) {
     std::cout << "Instrumenting " << name_ << " at: " << (void *)address
-              << ", ssn: 0x" << std::hex << ssn_ << std::dec << "\n";
+              << ", ssn: 0x" << std::hex << ssn << std::dec << "\n";
   }
-  return insertBrkpt(hProcess, address, preamble, pre_trace ? setssn : nullptr);
+  return insertBrkpt(hProcess, address, preamble, ssn,
+                     pre_trace ? setssn : nullptr);
 }
 
 //////////////////////////////////////////////////////////////////////////
 // Attempt to set a trap for the entry point in the target DLL.
-bool EntryPoint::clearNtTrap(HANDLE hProcess, NtCall const &ntCall) const {
+bool NtCall::clearNtTrap(HANDLE hProcess) const {
   if (preSave_) {
     unsigned char instruction[1 + 4];
     instruction[0] = MOVdwordEax;
     memcpy(instruction + 1, &ssn_, sizeof(ssn_));
     if (!WriteProcessMemory(hProcess, preSave_, instruction, 5, nullptr)) {
-      std::cerr << "Cannot clear trap for " << name_ << ": " << displayError()
-                << std::endl;
+      std::cerr << "Cannot clear trap for " << entryPoint_->getName() << ": "
+                << displayError() << std::endl;
       return false;
     }
   }
@@ -710,11 +717,11 @@ bool EntryPoint::clearNtTrap(HANDLE hProcess, NtCall const &ntCall) const {
     unsigned char instruction[4];
     int len(0);
 
-    switch (ntCall.trapType_) {
+    switch (trapType_) {
     case NtCall::trapContinue:
       instruction[0] = RETn;
-      instruction[1] = static_cast<unsigned char>(ntCall.nArgs_ * 4);
-      instruction[2] = static_cast<unsigned char>(ntCall.nArgs_ * 4 / 256);
+      instruction[1] = static_cast<unsigned char>(nArgs_ * 4);
+      instruction[2] = static_cast<unsigned char>(nArgs_ * 4 / 256);
       instruction[3] = MOVreg;
       len = 4;
       break;
@@ -737,8 +744,8 @@ bool EntryPoint::clearNtTrap(HANDLE hProcess, NtCall const &ntCall) const {
     if (len) {
       if (!WriteProcessMemory(hProcess, targetAddress_, instruction, len,
                               nullptr)) {
-        std::cerr << "Cannot clear trap for " << name_ << ": " << displayError()
-                  << std::endl;
+        std::cerr << "Cannot clear trap for " << entryPoint_->getName() << ": "
+                  << displayError() << std::endl;
         return false;
       }
     }
@@ -818,15 +825,20 @@ void EntryPoint::setReturnType(std::string const &typeName,
 //////////////////////////////////////////////////////////////////////////
 // Handle pre-saving register arguments before the fast call
 
-void EntryPoint::doPreSave(HANDLE hProcess, HANDLE hThread,
-                           CONTEXT const &Context) {
-#ifdef _M_X64
+void NtCall::doPreSave(HANDLE hProcess, HANDLE hThread,
+                       CONTEXT const &Context) const {
   CONTEXT newContext = Context;
   newContext.ContextFlags = CONTEXT_INTEGER;
+#ifdef _M_X64
   newContext.Rax = ssn_;
+#else
+  newContext.Eax = ssn_;
+#endif // _M_X64
   if (!SetThreadContext(hThread, &newContext)) {
     std::cerr << "Can't set thread context: " << displayError() << std::endl;
   }
+
+#ifdef _M_X64
   ULONG_PTR saveArea[4];
   saveArea[0] = Context.Rcx;
   saveArea[1] = Context.Rdx;
@@ -841,13 +853,7 @@ void EntryPoint::doPreSave(HANDLE hProcess, HANDLE hThread,
   }
 #else
   // Unused arguments
-  hProcess;
-  CONTEXT newContext = Context;
-  newContext.ContextFlags = CONTEXT_INTEGER;
-  newContext.Eax = ssn_;
-  if (!SetThreadContext(hThread, &newContext)) {
-    std::cerr << "Can't set thread context: " << displayError() << std::endl;
-  }
+  (void)hProcess;
 #endif // _M_X64
 }
 
@@ -1321,7 +1327,7 @@ bool EntryPoint::readEntryPoints(std::istream &cfgFile,
 //////////////////////////////////////////////////////////////////////////
 // Print self to a stream, as a function prototype
 void EntryPoint::writeExport(std::ostream &os) const {
-  if (targetAddress_ == nullptr && !disabled_)
+  if (inactive_ && !disabled_)
     os << "//inactive\n";
   os << "//[" << (disabled_ ? "-" : "") << (optional_ ? "?" : "") << category_
      << "]\n";
