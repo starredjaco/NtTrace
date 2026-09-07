@@ -31,7 +31,7 @@ COPYRIGHT
   IN THE SOFTWARE."
 */
 
-// $Id: EntryPoint.cpp 3190 2026-09-05 19:49:04Z roger $
+// $Id: EntryPoint.cpp 3194 2026-09-07 09:57:54Z roger $
 
 #include "EntryPoint.h"
 
@@ -242,9 +242,15 @@ unsigned char const signature1[] = {0x4c, 3, MOVdwordEax, 5,
 unsigned char const signature2[] = {0x4c, 3,    MOVdwordEax, 5, 0xf6, 8, 0x75,
                                     2,    0x0f, 2,           0, 0}; // 21 bytes
 
+// signature2 patched by "jump" and breakpoints by instrumentation software
+unsigned char const signature3[] = {JMP,   5, BRKPT, 1, BRKPT, 1,
+                                    BRKPT, 1, 0xf6,  8, 0x75,  2,
+                                    0x0f,  2, 0,     0}; // 21 bytes
+
 unsigned char const *const signatures[] = {
     signature1,
     signature2,
+    signature3,
 };
 
 unsigned int const MAX_PREAMBLE(21);
@@ -419,8 +425,8 @@ void Argument::printOn(std::ostream &os) const {
 
 //////////////////////////////////////////////////////////////////////////
 NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
-                               unsigned int offset, DWORD ssn,
-                               unsigned char *setssn) {
+                               unsigned int offset, PreType pre_type,
+                               unsigned char *pre_target, DWORD pre_arg) {
   // (The post-call code is at address + offset)
   // Looks like:-
   //  C2 20 00           ret         20h
@@ -433,7 +439,6 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
   //  E9 XX XX XX XX     jmp         commonExit
 
   NtCall nt;
-  nt.ssn_ = ssn;
 
   unsigned char instruction[8];
 
@@ -554,19 +559,34 @@ NtCall EntryPoint::insertBrkpt(HANDLE hProcess, unsigned char *address,
   }
   nt.setAddress(address + offset);
 
-  if (setssn) {
+  nt.preType_ = pre_type;
+  switch (pre_type) {
+  case preMov:
     instruction[0] = BRKPT;
     instruction[1] = NOP;
     instruction[2] = NOP;
     instruction[3] = NOP;
     instruction[4] = NOP;
 
-    if (!WriteProcessMemory(hProcess, setssn, instruction, 5, nullptr)) {
+    if (!WriteProcessMemory(hProcess, pre_target, instruction, 5, nullptr)) {
       std::cerr << "Cannot write trap for " << name_ << ": " << displayError()
                 << std::endl;
       return {};
     }
-    nt.setPreSave(setssn);
+    nt.ssn_ = pre_arg;
+    nt.setPreSave(pre_target);
+    break;
+  case preJump:
+    instruction[0] = BRKPT;
+    if (!WriteProcessMemory(hProcess, pre_target, instruction, 1, nullptr)) {
+      std::cerr << "Cannot write trap for " << name_ << ": " << displayError()
+                << std::endl;
+      return {};
+    }
+    nt.preTarget_ =
+        pre_arg + 5; // jmp is relative to the end of the 5 byte instruction
+    nt.setPreSave(pre_target);
+    break;
   }
 
   nt.entryPoint_ = this;
@@ -648,10 +668,12 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
     return {};
   }
 
-  unsigned char *setssn = nullptr;
+  unsigned char *pre_target = nullptr;
+  PreType pre_type{};
   for (const auto *pCheck : signatures) {
     unsigned int offset = 0;
-    setssn = nullptr;
+    pre_target = nullptr;
+    pre_type = preNone;
     for (; *pCheck != 0; pCheck += 2) {
       if (instruction[offset] == BRKPT) {
         // already pre-trace trapping!
@@ -661,7 +683,11 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
       if (instruction[offset] != pCheck[0])
         break;
       if (instruction[offset] == MOVdwordEax) {
-        setssn = address + offset;
+        pre_type = preMov;
+        pre_target = address + offset;
+      } else if (instruction[offset] == JMP) {
+        pre_type = preJump;
+        pre_target = address + offset;
       }
       offset += pCheck[1];
     }
@@ -683,20 +709,27 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
               << " - wrong signature: " << buffToHex(instruction, MAX_PREAMBLE)
               << std::endl;
     return {};
-  } else if (setssn == nullptr) {
-    std::cerr << "Cannot trap " << name_
-              << " - cannot find system service number" << std::endl;
+  } else if (pre_target == nullptr) {
+    std::cerr << "Cannot trap " << name_ << " - cannot identify call type"
+              << std::endl;
     return {};
   }
 
-  DWORD ssn{};
-  memcpy(&ssn, instruction + (setssn - address) + 1, sizeof(ssn));
+  DWORD pre_arg{};
+  memcpy(&pre_arg, instruction + (pre_target - address) + 1, sizeof(pre_arg));
   if (verbose) {
-    std::cout << "Instrumenting " << name_ << " at: " << (void *)address
-              << ", ssn: 0x" << std::hex << ssn << std::dec << "\n";
+    std::cout << "Instrumenting " << name_ << " at: " << (void *)address;
+    if (pre_type == preMov) {
+      std::cout << ", ssn: 0x" << std::hex << pre_arg << std::dec;
+    }
+    std::cout << "\n";
   }
-  return insertBrkpt(hProcess, address, preamble, ssn,
-                     pre_trace ? setssn : nullptr);
+
+  if (!pre_trace) {
+    pre_type = preNone;
+  }
+  return insertBrkpt(hProcess, address, preamble, pre_type, pre_target,
+                     pre_arg);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -704,12 +737,25 @@ NtCall EntryPoint::setNtTrap(HANDLE hProcess, HMODULE hTargetDll,
 bool NtCall::clearNtTrap(HANDLE hProcess) const {
   if (preSave_) {
     unsigned char instruction[1 + 4];
-    instruction[0] = MOVdwordEax;
-    memcpy(instruction + 1, &ssn_, sizeof(ssn_));
-    if (!WriteProcessMemory(hProcess, preSave_, instruction, 5, nullptr)) {
-      std::cerr << "Cannot clear trap for " << entryPoint_->getName() << ": "
-                << displayError() << std::endl;
-      return false;
+    switch (preType_) {
+    case preMov:
+      instruction[0] = MOVdwordEax;
+      memcpy(instruction + 1, &ssn_, sizeof(ssn_));
+      if (!WriteProcessMemory(hProcess, preSave_, instruction, 5, nullptr)) {
+        std::cerr << "Cannot clear trap for " << entryPoint_->getName() << ": "
+                  << displayError() << std::endl;
+        return false;
+      }
+      break;
+
+    case preJump:
+      instruction[0] = JMP;
+      if (!WriteProcessMemory(hProcess, preSave_, instruction, 1, nullptr)) {
+        std::cerr << "Cannot clear trap for " << entryPoint_->getName() << ": "
+                  << displayError() << std::endl;
+        return false;
+      }
+      break;
     }
   }
 
@@ -828,12 +874,26 @@ void EntryPoint::setReturnType(std::string const &typeName,
 void NtCall::doPreSave(HANDLE hProcess, HANDLE hThread,
                        CONTEXT const &Context) const {
   CONTEXT newContext = Context;
-  newContext.ContextFlags = CONTEXT_INTEGER;
+  switch (preType_) {
+  case preMov:
+    newContext.ContextFlags = CONTEXT_INTEGER;
+
 #ifdef _M_X64
-  newContext.Rax = ssn_;
+    newContext.Rax = ssn_;
 #else
-  newContext.Eax = ssn_;
+    newContext.Eax = ssn_;
 #endif // _M_X64
+    break;
+  case preJump:
+    newContext.ContextFlags = CONTEXT_CONTROL;
+
+#ifdef _M_X64
+    newContext.Rip += preTarget_;
+#else
+    newContext.Eip = preTarget_;
+#endif // _M_X64
+    break;
+  }
   if (!SetThreadContext(hThread, &newContext)) {
     std::cerr << "Can't set thread context: " << displayError() << std::endl;
   }
